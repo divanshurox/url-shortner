@@ -31,11 +31,13 @@ type GracefulServerInterface interface {
 	Stop(ctx context.Context) error
 }
 
-func NewServer(ctx context.Context, cnf *config.Config) *GracefulServer {
+func NewServer(ctx context.Context, cnf *config.Config) (*GracefulServer, error) {
 	mux := chi.NewMux()
-	logger.InitializeLogger()
+	err := logger.InitializeLogger()
+	if err != nil {
+		return nil, err
+	}
 	logger.Logger().Info("configuration", zap.Any("config", cnf))
-
 	pg, err := db.InitPostgres(ctx, &db.PostgresOpts{
 		DatabaseURL:     cnf.DatabaseURL,
 		MaxConns:        cnf.DBMaxConns,
@@ -70,11 +72,11 @@ func NewServer(ctx context.Context, cnf *config.Config) *GracefulServer {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       15 * time.Second,
 	}
-	return &GracefulServer{server: server, pg: pg, rd: rd}
+	return &GracefulServer{server: server, pg: pg, rd: rd}, nil
 }
 
 func (gs *GracefulServer) Prestart() error {
-	return logger.InitializeLogger()
+	return nil
 }
 
 func (gs *GracefulServer) Start(ctx context.Context) error {

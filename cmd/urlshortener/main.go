@@ -16,8 +16,8 @@ func main() {
 	shutdownCtx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	srv := server.NewServer(shutdownCtx, cnf)
-	if err := srv.Prestart(); err != nil {
+	srv, err := server.NewServer(shutdownCtx, cnf)
+	if err != nil {
 		panic(err)
 	}
 
