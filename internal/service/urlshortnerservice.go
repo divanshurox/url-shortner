@@ -5,15 +5,16 @@ import (
 	"UrlShortener/internal/db"
 	"UrlShortener/internal/logger"
 	"UrlShortener/internal/model"
+	"UrlShortener/internal/utils"
 	"context"
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"time"
 )
 
 type UrlShortenerServiceImpl struct {
-	UrlRepo  *db.UrlRepo
-	UrlCache *cache.ShortUrlCache
+	UrlRepo        *db.UrlRepo
+	UrlCache       *cache.ShortUrlCache
+	CounterService *cache.CounterCache
 }
 
 func NewUrlShortenerService(ctx context.Context, pg *db.Postgres, rd *cache.Redis) *UrlShortenerServiceImpl {
@@ -24,15 +25,20 @@ func NewUrlShortenerService(ctx context.Context, pg *db.Postgres, rd *cache.Redi
 		zap.Int32("idleConns", stats.IdleConns()),
 	)
 	urlCache := cache.NewShortUrlCache(rd)
+	counterService := cache.NewCounterCache(rd)
 	return &UrlShortenerServiceImpl{
-		UrlRepo:  urlRepo,
-		UrlCache: urlCache,
+		UrlRepo:        urlRepo,
+		UrlCache:       urlCache,
+		CounterService: counterService,
 	}
 }
 
 func (s *UrlShortenerServiceImpl) CreateShortUrl(ctx context.Context, req *model.CreateShortUrlReq) (*model.CreateShortUrlRes, error) {
-	shortUrl := generateShortUrl()
-	if err := s.UrlRepo.Create(ctx, shortUrl, req.Url, &req.ExpirationDate); err != nil {
+	shortUrl, err := generateShortUrl(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.UrlRepo.Create(ctx, shortUrl, req.Url, &req.ExpirationDate); err != nil {
 		return nil, err
 	}
 	res := &model.CreateShortUrlRes{
@@ -52,7 +58,7 @@ func (s *UrlShortenerServiceImpl) GetUrlFromShortUrl(ctx context.Context, req *m
 			logger.Logger().Error("error while getting shorturl entry from DB", zap.String("shortUrl", shortUrl), zap.Error(err))
 			return nil, err
 		}
-		err = s.UrlCache.Set(ctx, shortUrl, row.OriginalUrl, 30*time.Minute)
+		err = s.UrlCache.Set(ctx, shortUrl, row.OriginalUrl, time.Until(row.ExpiresAt))
 		if err != nil {
 			logger.Logger().Error("unable to set shorturl from cache", zap.String("shortUrl", shortUrl), zap.Error(err))
 		}
@@ -74,6 +80,11 @@ func (s *UrlShortenerServiceImpl) GetUrlFromShortUrl(ctx context.Context, req *m
 	return res, nil
 }
 
-func generateShortUrl() string {
-	return uuid.New().String()
+func generateShortUrl(ctx context.Context, s *UrlShortenerServiceImpl) (string, error) {
+	counter, err := s.CounterService.GetCounter(ctx)
+	if err != nil {
+		return "", err
+	}
+	encoded := utils.EncodeBase62(counter)
+	return encoded, nil
 }
